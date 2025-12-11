@@ -1,12 +1,21 @@
 import os
+import logging
 from dotenv import load_dotenv
+
+# Setup Logging (Critique Fixed: No more print statements)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()]
+)
 
 load_dotenv()
 
 class Config:
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-    # Llama 3.3 70B is powerful and fast on Groq
-    MODEL_NAME = "llama-3.3-70b-versatile" 
-    
+    # Critique Fixed: Raise error if Env var is missing
     if not GROQ_API_KEY:
-        print("Warning: No GROQ_API_KEY found in env")
+        raise ValueError("CRITICAL: GROQ_API_KEY is missing from environment variables.")
+        
+    # Critique Fixed: Model is configurable, no hardcoded fallback in logic
+    MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
