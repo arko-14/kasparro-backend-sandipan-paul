@@ -1,6 +1,7 @@
 import json
-from langchain_groq import ChatGroq
-from langchain_core.output_parsers import PydanticOutputParser, StrOutputParser
+import logging
+from langchain_groq import ChatGroq # type: ignore
+from langchain_core.output_parsers import PydanticOutputParser, StrOutputParser, JsonOutputParser
 from .config import Config
 from .schemas import ProductData, FAQPage, ProductPage, ComparisonPage, FAQItem
 from .templates import (
@@ -8,64 +9,88 @@ from .templates import (
     PRODUCT_PAGE_TEMPLATE, COMPETITOR_GEN_TEMPLATE, COMPARISON_TEMPLATE
 )
 
-# Initialize LLM
+logger = logging.getLogger(__name__)
+
 llm = ChatGroq(
     groq_api_key=Config.GROQ_API_KEY, 
     model_name=Config.MODEL_NAME,
-    temperature=0.1  # LOWER temperature to be more precise/strict
+    temperature=0.1
 )
 
-class AgentOrchestrator:
+class AgentFactory:
     
     @staticmethod
-    def generate_faqs(product: ProductData) -> FAQPage:
-        """Agent 1: Generates questions, then answers them."""
-        print("   -> [Agent: Insight] Generating questions...")
-        q_chain = QUESTION_GEN_TEMPLATE | llm | StrOutputParser()
-        questions_raw = q_chain.invoke({"product_json": product.model_dump_json()})
-        
-        # Robust splitting
-        questions = [q.strip() for q in questions_raw.split('\n') if '?' in q][:5]
-        
-        print(f"   -> [Agent: Support] Answering {len(questions)} questions...")
-        faqs = []
-        for q in questions:
-            a_chain = FAQ_ANSWER_TEMPLATE | llm | StrOutputParser()
-            ans = a_chain.invoke({"product_json": product.model_dump_json(), "question": q})
-            faqs.append(FAQItem(question=q, answer=ans, category="General"))
+    def generate_questions_node(state):
+        """Node 1: Generates questions using JSON parsing (Robustness fix)."""
+        logger.info("Generating user questions...")
+        try:
+            # Critique Fixed: Use JsonOutputParser instead of brittle .split('\n')
+            chain = QUESTION_GEN_TEMPLATE | llm | JsonOutputParser()
+            questions = chain.invoke({"product_json": state["product_data"]})
             
-        return FAQPage(faqs=faqs)
+            # Critique Fixed: Ensure we have a list
+            if not isinstance(questions, list):
+                raise ValueError("LLM did not return a list")
+                
+            return {"questions": questions}
+        except Exception as e:
+            logger.error(f"Failed to generate questions: {e}")
+            raise e
 
     @staticmethod
-    def generate_product_page(product: ProductData) -> ProductPage:
-        """Agent 2: Transforms raw data into a marketing landing page."""
-        print("   -> [Agent: Marketing] Drafting product page...")
-        parser = PydanticOutputParser(pydantic_object=ProductPage)
+    def answer_faq_node(state):
+        """Node 2: Answers questions using BATCH processing (Performance fix)."""
+        questions = state["questions"]
+        product_json = state["product_data"]
+        logger.info(f"Answering {len(questions)} questions in batch...")
         
-        # --- FIX: Injecting format instructions here ---
-        chain = PRODUCT_PAGE_TEMPLATE.partial(
-            format_instructions=parser.get_format_instructions()
-        ) | llm | parser
-        
-        return chain.invoke({"product_json": product.model_dump_json()})
+        try:
+            chain = FAQ_ANSWER_TEMPLATE | llm | StrOutputParser()
+            
+            # Critique Fixed: .batch() calls the API in parallel/async
+            inputs = [{"product_json": product_json, "question": q} for q in questions]
+            answers = chain.batch(inputs)
+            
+            faqs = [
+                FAQItem(question=q, answer=a, category="General") 
+                for q, a in zip(questions, answers)
+            ]
+            return {"faq_page": FAQPage(faqs=faqs)}
+        except Exception as e:
+            logger.error(f"Failed to batch answer FAQs: {e}")
+            raise e
 
     @staticmethod
-    def generate_comparison(product: ProductData) -> ComparisonPage:
-        """Agent 3: Invents a competitor and generates a comparison matrix."""
-        print("   -> [Agent: Competitor Analyst] Creating fictional competitor...")
-        
-        comp_chain = COMPETITOR_GEN_TEMPLATE | llm | StrOutputParser()
-        competitor_data = comp_chain.invoke({"product_name": product.name})
-        
-        print("   -> [Agent: Strategist] Building comparison matrix...")
-        parser = PydanticOutputParser(pydantic_object=ComparisonPage)
-        
-        # --- FIX: Injecting format instructions here ---
-        compare_chain = COMPARISON_TEMPLATE.partial(
-            format_instructions=parser.get_format_instructions()
-        ) | llm | parser
-        
-        return compare_chain.invoke({
-            "product_json": product.model_dump_json(),
-            "competitor_json": competitor_data
-        })
+    def product_page_node(state):
+        logger.info("Drafting product page...")
+        try:
+            parser = PydanticOutputParser(pydantic_object=ProductPage)
+            chain = PRODUCT_PAGE_TEMPLATE.partial(format_instructions=parser.get_format_instructions()) | llm | parser
+            result = chain.invoke({"product_json": state["product_data"]})
+            return {"product_page": result}
+        except Exception as e:
+            logger.error(f"Failed to generate product page: {e}")
+            raise e
+
+    @staticmethod
+    def comparison_node(state):
+        logger.info("Analyzing competition...")
+        try:
+            product_name = json.loads(state["product_data"])["name"]
+            
+            # Sub-step 1
+            comp_chain = COMPETITOR_GEN_TEMPLATE | llm | StrOutputParser()
+            competitor_data = comp_chain.invoke({"product_name": product_name})
+            
+            # Sub-step 2
+            parser = PydanticOutputParser(pydantic_object=ComparisonPage)
+            compare_chain = COMPARISON_TEMPLATE.partial(format_instructions=parser.get_format_instructions()) | llm | parser
+            
+            result = compare_chain.invoke({
+                "product_json": state["product_data"],
+                "competitor_json": competitor_data
+            })
+            return {"comparison_page": result}
+        except Exception as e:
+            logger.error(f"Failed comparison generation: {e}")
+            raise e
