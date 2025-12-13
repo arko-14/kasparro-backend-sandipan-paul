@@ -28,7 +28,7 @@ RAW_DATA = {
 }
 
 def save_json_artifact(filename, data):
-    """Critique Fixed: Reusable helper with error handling."""
+    """Reusable helper with error handling."""
     try:
         with open(filename, "w", encoding="utf-8") as f:
             f.write(data.model_dump_json(indent=2))
