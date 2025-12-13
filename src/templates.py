@@ -4,7 +4,7 @@ from langchain_core.prompts import ChatPromptTemplate
 QUESTION_GEN_TEMPLATE = ChatPromptTemplate.from_template(
     """
     Analyze this product: {product_json}
-    Generate exactly 15 distinct user questions about it.
+    Generate exactly 20 distinct user questions about it (mixed categories like Safety, Usage, Price).
     Return the output as a pure JSON list of strings.
     Example: ["Question 1?", "Question 2?"]
     """
