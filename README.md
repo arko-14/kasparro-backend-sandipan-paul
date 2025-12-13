@@ -146,6 +146,18 @@ Execute the main orchestration script:
 python main.py
 ```
 
+### System in Action
+
+Below are screenshots showing the system running and generating content:
+
+#### Pipeline Execution
+![Pipeline Running](https://nyc3.digitaloceanspaces.com/bhindi-drive/files/891c1db7-dbd9-44b6-9131-8af4a963d179/2025-12-13T17-35-24-477Z-a5f6eb50-chat-image-1765647324457-0.jpg)
+*The agentic pipeline executing with real-time logging showing each node's progress*
+
+#### Test Suite Validation
+![Test Results](https://nyc3.digitaloceanspaces.com/bhindi-drive/files/891c1db7-dbd9-44b6-9131-8af4a963d179/2025-12-13T17-35-24-596Z-71e18f47-chat-image-1765647324578-1.jpg)
+*Pytest validation ensuring schema compliance and data integrity*
+
 ### Expected Output
 
 The system will generate three JSON files:
