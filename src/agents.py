@@ -1,6 +1,6 @@
 import json
 import logging
-from langchain_groq import ChatGroq # type: ignore
+from langchain_groq import ChatGroq
 from langchain_core.output_parsers import PydanticOutputParser, StrOutputParser, JsonOutputParser
 from .config import Config
 from .schemas import ProductData, FAQPage, ProductPage, ComparisonPage, FAQItem
@@ -21,17 +21,22 @@ class AgentFactory:
     
     @staticmethod
     def generate_questions_node(state):
-        """Node 1: Generates questions using JSON parsing (Robustness fix)."""
+        """Node 1: Generates questions using JSON parsing."""
         logger.info("Generating user questions...")
         try:
-            # Critique Fixed: Use JsonOutputParser instead of brittle .split('\n')
+            # Robust JSON parsing
             chain = QUESTION_GEN_TEMPLATE | llm | JsonOutputParser()
             questions = chain.invoke({"product_json": state["product_data"]})
             
-            # Critique Fixed: Ensure we have a list
+            # Validation: Ensure we have a list
             if not isinstance(questions, list):
-                raise ValueError("LLM did not return a list")
-                
+                logger.warning("LLM returned non-list, attempting to wrap.")
+                questions = [str(questions)]
+            
+            
+            if len(questions) < 5:
+                logger.warning(f"Only generated {len(questions)} questions. Retrying might be needed in prod.")
+
             return {"questions": questions}
         except Exception as e:
             logger.error(f"Failed to generate questions: {e}")
@@ -39,7 +44,7 @@ class AgentFactory:
 
     @staticmethod
     def answer_faq_node(state):
-        """Node 2: Answers questions using BATCH processing (Performance fix)."""
+        """Node 2: Answers questions using BATCH processing."""
         questions = state["questions"]
         product_json = state["product_data"]
         logger.info(f"Answering {len(questions)} questions in batch...")
@@ -47,7 +52,7 @@ class AgentFactory:
         try:
             chain = FAQ_ANSWER_TEMPLATE | llm | StrOutputParser()
             
-            # Critique Fixed: .batch() calls the API in parallel/async
+            # Batch calls the API in parallel/async
             inputs = [{"product_json": product_json, "question": q} for q in questions]
             answers = chain.batch(inputs)
             
@@ -62,6 +67,7 @@ class AgentFactory:
 
     @staticmethod
     def product_page_node(state):
+        """Node 3: Generates Product Page."""
         logger.info("Drafting product page...")
         try:
             parser = PydanticOutputParser(pydantic_object=ProductPage)
@@ -74,15 +80,16 @@ class AgentFactory:
 
     @staticmethod
     def comparison_node(state):
+        """Node 4: Generates Comparison."""
         logger.info("Analyzing competition...")
         try:
             product_name = json.loads(state["product_data"])["name"]
             
-            # Sub-step 1
+            # Sub-step 1: Create Competitor
             comp_chain = COMPETITOR_GEN_TEMPLATE | llm | StrOutputParser()
             competitor_data = comp_chain.invoke({"product_name": product_name})
             
-            # Sub-step 2
+            # Sub-step 2: Matrix
             parser = PydanticOutputParser(pydantic_object=ComparisonPage)
             compare_chain = COMPARISON_TEMPLATE.partial(format_instructions=parser.get_format_instructions()) | llm | parser
             
